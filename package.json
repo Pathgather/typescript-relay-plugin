@@ -1,0 +1,24 @@
+{
+  "name": "typescript-relay-plugin",
+  "version": "0.1.0",
+  "description": "Relay.QL plugin for Typescript",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Guntars Asmanis-Graham",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/babel-types": "^6.7.14",
+    "@types/chalk": "^0.4.31",
+    "@types/node": "^6.0.45"
+  },
+  "dependencies": {
+    "chalk": "^1.1.3"
+  },
+  "peerDependencies": {
+    "babel-relay-plugin": "*",
+    "graphql": "*",
+    "typescript": "*"
+  }
+}
