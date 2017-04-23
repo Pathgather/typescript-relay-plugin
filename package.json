@@ -1,7 +1,8 @@
 {
   "name": "typescript-relay-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Relay.QL plugin for Typescript",
+  "repository": "Pathgather/typescript-relay-plugin",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
