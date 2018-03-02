@@ -13,7 +13,10 @@ function loadSchema(filePath) {
     return buildClientSchema_1.buildClientSchema(require(filePath).data);
 }
 exports.loadSchema = loadSchema;
-function getTransformer(schema) {
+function getTransformer(schema, options) {
+    if (options === void 0) { options = {}; }
+    var _a = options.colorize, colorize = _a === void 0 ? true : _a, _b = options.logError, logError = _b === void 0 ? console.error : _b;
+    var red = colorize ? chalk.red : function (str) { return str; }, yellow = colorize ? chalk.yellow : function (str) { return str; };
     var relayQlTransformer = new RelayQLTransformer(schema, {
         snakeCase: false,
         substituteVariables: false
@@ -54,10 +57,10 @@ function getTransformer(schema) {
                 }
                 catch (error) {
                     if (error.stack && !error.stack.includes("validation errors")) {
-                        console.error(chalk.red(error.stack));
+                        logError(red(error.stack));
                     }
-                    else {
-                        console.error(chalk.red(error));
+                    else if (error.message) {
+                        logError(red(error.message));
                     }
                     if (error.sourceText && error.validationErrors) {
                         var source = error.sourceText;
@@ -74,16 +77,18 @@ function getTransformer(schema) {
                                 });
                             });
                         });
+                        var message_1 = "";
                         source.split("\n").forEach(function (line, idx) {
                             var lineNum = idx + 1;
-                            console.log(line);
+                            message_1 += line + "\n";
                             if (errorsByLine_1[lineNum]) {
                                 errorsByLine_1[lineNum].forEach(function (error) {
                                     var spacer = " ".repeat(error.column - 1);
-                                    console.log(spacer + chalk.yellow("^ " + error.message));
+                                    message_1 += spacer + yellow("^ " + error.message) + "\n";
                                 });
                             }
                         });
+                        logError(message_1.trim());
                     }
                     if (process.env.NODE_ENV === "production") {
                         throw error;
@@ -99,7 +104,7 @@ function getTransformer(schema) {
                         undefined, // type
                         ts.createBlock([
                             ts.createThrow(ts.createNew(ts.createIdentifier("Error"), undefined, // type params
-                            [ts.createLiteral(error.message)]))
+                            [ts.createLiteral(error.message)])),
                         ])), undefined, // type params
                         undefined);
                     }
@@ -117,7 +122,8 @@ function convertTemplateLiteral(node) {
             start: node.pos - 1,
             end: node.end + 1,
             loc: null,
-            quasis: [{
+            quasis: [
+                {
                     type: "TemplateElement",
                     start: node.pos,
                     end: node.end,
@@ -127,13 +133,15 @@ function convertTemplateLiteral(node) {
                         raw: node.text,
                         cooked: node.text
                     }
-                }],
+                },
+            ],
             expressions: []
         };
     }
     else {
         var expressions = [];
-        var quasis = [{
+        var quasis = [
+            {
                 type: "TemplateElement",
                 start: node.head.pos,
                 end: node.head.end,
@@ -143,7 +151,8 @@ function convertTemplateLiteral(node) {
                     raw: node.head.text,
                     cooked: node.head.text
                 }
-            }];
+            },
+        ];
         for (var _i = 0, _a = node.templateSpans; _i < _a.length; _i++) {
             var span = _a[_i];
             expressions.push({
@@ -191,12 +200,14 @@ function convertBabelNode(node) {
         undefined, // asterisk token
         undefined, // name
         undefined, // type params
-        node.params.map(function (param) { return ts.createParameter(undefined, // decorators
-        undefined, // modifiers
-        undefined, // dotdotdot token
-        convertBabelNode(param), undefined, // question token,
-        undefined, // type,
-        undefined); }), undefined, // type
+        node.params.map(function (param) {
+            return ts.createParameter(undefined, // decorators
+            undefined, // modifiers
+            undefined, // dotdotdot token
+            convertBabelNode(param), undefined, // question token,
+            undefined, // type,
+            undefined);
+        }), undefined, // type
         ts.createBlock(stmts));
     }
     else if (bt.isIdentifier(node)) {

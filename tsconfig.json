@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
-    "types": ["node"],
+    "types": ["node", "mocha"],
     "lib": ["es6"]
   },
+  "files": ["index.ts"],
   "compileOnSave": true
 }

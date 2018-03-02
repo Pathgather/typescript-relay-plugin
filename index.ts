@@ -2,7 +2,7 @@ import * as bt from "babel-types"
 import * as chalk from "chalk"
 import * as path from "path"
 import * as ts from "typescript"
-import {buildClientSchema} from "graphql/utilities/buildClientSchema"
+import { buildClientSchema } from "graphql/utilities/buildClientSchema"
 import RelayQLTransformer = require("babel-relay-plugin/lib/RelayQLTransformer")
 import RelayTransformError = require("babel-relay-plugin/lib/RelayTransformError")
 
@@ -14,10 +14,25 @@ export function loadSchema(filePath: string): any {
   return buildClientSchema(require(filePath).data)
 }
 
-export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
+export interface TransformerOptions {
+  // Should the error output be colorized (default true)
+  colorize?: boolean
+
+  // Allow using a custom error function
+  logError?: typeof console.error
+}
+
+export function getTransformer(
+  schema,
+  options: TransformerOptions = {},
+): ts.TransformerFactory<ts.SourceFile> {
+  const { colorize = true, logError = console.error } = options
+  const red = colorize ? chalk.red : str => str,
+    yellow = colorize ? chalk.yellow : str => str
+
   const relayQlTransformer = new RelayQLTransformer(schema, {
     snakeCase: false,
-    substituteVariables: false
+    substituteVariables: false,
   })
 
   return function transformer(context): ts.Transformer<ts.SourceFile> {
@@ -25,7 +40,10 @@ export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
 
     return node => {
       sourcePath = node.fileName
-      const result = ts.updateSourceFileNode(node, ts.visitLexicalEnvironment(node.statements, visitor, context))
+      const result = ts.updateSourceFileNode(
+        node,
+        ts.visitLexicalEnvironment(node.statements, visitor, context),
+      )
       sourcePath = undefined
       return result
     }
@@ -44,7 +62,6 @@ export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
 
     function visitTaggedTemplateExpression(node: ts.TaggedTemplateExpression): ts.Node {
       if (node.tag.getText() === "Relay.QL") {
-
         try {
           // Convert the file's basename to an ok document name
           const documentName = getDocumentName(sourcePath)
@@ -56,12 +73,11 @@ export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
           })
 
           return convertBabelNode(result)
-
         } catch (error) {
           if (error.stack && !error.stack.includes("validation errors")) {
-            console.error(chalk.red(error.stack))
-          } else {
-            console.error(chalk.red(error))
+            logError(red(error.stack))
+          } else if (error.message) {
+            logError(red(error.message))
           }
 
           if (error.sourceText && error.validationErrors) {
@@ -83,22 +99,26 @@ export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
                 errorsByLine[location.line].push({
                   line: location.line,
                   column: location.column,
-                  message: error.message
+                  message: error.message,
                 })
               })
             })
 
+            let message = ""
+
             source.split("\n").forEach((line, idx) => {
               const lineNum = idx + 1
-              console.log(line)
+              message += line + "\n"
 
               if (errorsByLine[lineNum]) {
                 errorsByLine[lineNum].forEach(error => {
                   const spacer = " ".repeat(error.column - 1)
-                  console.log(spacer + chalk.yellow("^ " + error.message))
+                  message += spacer + yellow("^ " + error.message) + "\n"
                 })
               }
             })
+
+            logError(message.trim())
           }
 
           if (process.env.NODE_ENV === "production") {
@@ -119,8 +139,11 @@ export function getTransformer(schema): ts.TransformerFactory<ts.SourceFile> {
                     ts.createNew(
                       ts.createIdentifier("Error"),
                       undefined, // type params
-                      [ts.createLiteral(error.message)]))
-                ])),
+                      [ts.createLiteral(error.message)],
+                    ),
+                  ),
+                ]),
+              ),
               undefined, // type params
               undefined, // arguments
             )
@@ -139,32 +162,36 @@ function convertTemplateLiteral(node: ts.TemplateLiteral): bt.TemplateLiteral {
       start: node.pos - 1,
       end: node.end + 1,
       loc: null,
-      quasis: [{
-        type: "TemplateElement",
-        start: node.pos,
-        end: node.end,
-        loc: null,
-        tail: true,
-        value: {
-          raw: node.text,
-          cooked: node.text
-        }
-      }],
+      quasis: [
+        {
+          type: "TemplateElement",
+          start: node.pos,
+          end: node.end,
+          loc: null,
+          tail: true,
+          value: {
+            raw: node.text,
+            cooked: node.text,
+          },
+        },
+      ],
       expressions: [],
     }
   } else {
     const expressions: bt.Expression[] = []
-    const quasis: bt.TemplateElement[] = [{
-      type: "TemplateElement",
-      start: node.head.pos,
-      end: node.head.end,
-      loc: null,
-      tail: false,
-      value: {
-        raw: node.head.text,
-        cooked: node.head.text,
-      }
-    }]
+    const quasis: bt.TemplateElement[] = [
+      {
+        type: "TemplateElement",
+        start: node.head.pos,
+        end: node.head.end,
+        loc: null,
+        tail: false,
+        value: {
+          raw: node.head.text,
+          cooked: node.head.text,
+        },
+      },
+    ]
 
     for (const span of node.templateSpans) {
       expressions.push({
@@ -173,7 +200,7 @@ function convertTemplateLiteral(node: ts.TemplateLiteral): bt.TemplateLiteral {
         end: span.expression.end,
         loc: null,
         expression: span.expression,
-        __ts_node: true
+        __ts_node: true,
       } as any)
 
       quasis.push({
@@ -184,8 +211,8 @@ function convertTemplateLiteral(node: ts.TemplateLiteral): bt.TemplateLiteral {
         tail: false,
         value: {
           raw: span.literal.text,
-          cooked: span.literal.text
-        }
+          cooked: span.literal.text,
+        },
       })
     }
 
@@ -209,7 +236,8 @@ function convertBabelNode(node) {
     return ts.createCall(
       convertBabelNode(node.callee),
       undefined, // type arguments
-      node.arguments.map(convertBabelNode))
+      node.arguments.map(convertBabelNode),
+    )
   } else if (bt.isFunctionExpression(node)) {
     const stmts = node.body.body.map(convertBabelNode)
     return ts.createFunctionExpression(
@@ -217,29 +245,28 @@ function convertBabelNode(node) {
       undefined, // asterisk token
       undefined, // name
       undefined, // type params
-      node.params.map(param => ts.createParameter(
-        undefined, // decorators
-        undefined, // modifiers
-        undefined, // dotdotdot token
-        convertBabelNode(param),
-        undefined, // question token,
-        undefined, // type,
-        undefined, // initializer
-      )),
+      node.params.map(param =>
+        ts.createParameter(
+          undefined, // decorators
+          undefined, // modifiers
+          undefined, // dotdotdot token
+          convertBabelNode(param),
+          undefined, // question token,
+          undefined, // type,
+          undefined, // initializer
+        ),
+      ),
       undefined, // type
-      ts.createBlock(stmts))
+      ts.createBlock(stmts),
+    )
   } else if (bt.isIdentifier(node)) {
     return ts.createIdentifier(node.name)
   } else if (bt.isMemberExpression(node)) {
-    return ts.createPropertyAccess(
-      convertBabelNode(node.object),
-      convertBabelNode(node.property))
+    return ts.createPropertyAccess(convertBabelNode(node.object), convertBabelNode(node.property))
   } else if (bt.isObjectExpression(node)) {
     return ts.createObjectLiteral(node.properties.map(convertBabelNode))
   } else if (bt.isObjectProperty(node)) {
-    return ts.createPropertyAssignment(
-      convertBabelNode(node.key),
-      convertBabelNode(node.value))
+    return ts.createPropertyAssignment(convertBabelNode(node.key), convertBabelNode(node.value))
   } else if (bt.isParenthesizedExpression(node)) {
     if (node["__ts_node"]) {
       return node.expression as any

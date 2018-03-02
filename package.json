@@ -5,14 +5,21 @@
   "repository": "Pathgather/typescript-relay-plugin",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "TS_NODE_PROJECT=. NODE_ENV=test mocha --require ts-node/register --require ts-node/register \"test/*_test.{js,ts,tsx}\"",
+    "test:watch": "nodemon -e ts,tsx --exec npm test"
   },
   "author": "Guntars Asmanis-Graham",
   "license": "MIT",
   "devDependencies": {
     "@types/babel-types": "^6.7.14",
     "@types/chalk": "^0.4.31",
-    "@types/node": "^6.0.45"
+    "@types/expect": "^1.20.3",
+    "@types/mocha": "^2.2.48",
+    "@types/node": "^6.0.45",
+    "expect": "^1.20.2",
+    "mocha": "^5.0.1",
+    "nodemon": "^1.17.1",
+    "ts-node": "^4.1.0"
   },
   "dependencies": {
     "babel-types": "6.x",
