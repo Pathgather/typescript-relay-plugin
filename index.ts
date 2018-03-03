@@ -1,38 +1,43 @@
 import * as bt from "babel-types"
-import * as chalk from "chalk"
+import * as fs from "fs"
+import * as GraphQL from "graphql"
 import * as path from "path"
 import * as ts from "typescript"
 import { buildClientSchema } from "graphql/utilities/buildClientSchema"
-import RelayQLTransformer = require("babel-relay-plugin/lib/RelayQLTransformer")
-import RelayTransformError = require("babel-relay-plugin/lib/RelayTransformError")
+import createTransformError = require("babel-plugin-relay/lib/createTransformError")
+import RelayQLTransformer = require("babel-plugin-relay/lib/RelayQLTransformer")
 
 // Internal flag that signifies if the node contains any ES2015 nodes. We need this to quicker find
 // tagged template expressions and avoid descending into Typescript nodes since visitEachChild breaks.
 const ContainsES2015 = 1 << 7
 
+// Load a JSON schema
 export function loadSchema(filePath: string): any {
   return buildClientSchema(require(filePath).data)
 }
 
-export interface TransformerOptions {
-  // Should the error output be colorized (default true)
-  colorize?: boolean
+// Load a .graphql schema
+export function loadGraphQLSchema(filePath: string) {
+  return GraphQL.buildASTSchema(GraphQL.parse(fs.readFileSync(filePath, "utf8")))
+}
 
-  // Allow using a custom error function
-  logError?: typeof console.error
+export interface TransformerOptions {
+  // Helper to get document name from the source filename
+  getDocumentName?: typeof getDocumentNameHelper
+
+  // A RelayQLTransformer option, defaults to false
+  substituteVariables?: boolean
 }
 
 export function getTransformer(
   schema,
   options: TransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
-  const { colorize = true, logError = console.error } = options
-  const red = colorize ? chalk.red : str => str,
-    yellow = colorize ? chalk.yellow : str => str
+  const { getDocumentName = getDocumentNameHelper, substituteVariables = false } = options
 
   const relayQlTransformer = new RelayQLTransformer(schema, {
     snakeCase: false,
-    substituteVariables: false,
+    substituteVariables,
   })
 
   return function transformer(context): ts.Transformer<ts.SourceFile> {
@@ -63,94 +68,30 @@ export function getTransformer(
     function visitTaggedTemplateExpression(node: ts.TaggedTemplateExpression): ts.Node {
       if (node.tag.getText() === "Relay.QL") {
         try {
-          // Convert the file's basename to an ok document name
-          const documentName = getDocumentName(sourcePath)
           const template = convertTemplateLiteral(node.template)
           const result = relayQlTransformer.transform(bt, template, {
-            documentName: documentName,
+            documentName: getDocumentName(sourcePath),
             enableValidation: true,
             tagName: "Relay.QL",
+            propName: getPropName(node),
           })
 
           return convertBabelNode(result)
         } catch (error) {
-          if (error.stack && !error.stack.includes("validation errors")) {
-            logError(red(error.stack))
-          } else if (error.message) {
-            logError(red(error.message))
-          }
-
-          if (error.sourceText && error.validationErrors) {
-            const source: string = error.sourceText
-            const errorsByLine: {
-              [line: number]: {
-                line: number
-                column: number
-                message: string
-              }[]
-            } = {}
-
-            error.validationErrors.forEach(error => {
-              error.locations.forEach(location => {
-                if (!errorsByLine[location.line]) {
-                  errorsByLine[location.line] = []
-                }
-
-                errorsByLine[location.line].push({
-                  line: location.line,
-                  column: location.column,
-                  message: error.message,
-                })
-              })
-            })
-
-            let message = ""
-
-            source.split("\n").forEach((line, idx) => {
-              const lineNum = idx + 1
-              message += line + "\n"
-
-              if (errorsByLine[lineNum]) {
-                errorsByLine[lineNum].forEach(error => {
-                  const spacer = " ".repeat(error.column - 1)
-                  message += spacer + yellow("^ " + error.message) + "\n"
-                })
-              }
-            })
-
-            logError(message.trim())
-          }
-
-          if (process.env.NODE_ENV === "production") {
-            throw error
-          } else {
-            // Generate a runtime throw statement. Because this will get inserted as the return value,
-            // wrap the throw in an IIFE. Pfft, throw statements, please..
-            return ts.createCall(
-              ts.createFunctionExpression(
-                undefined, // modifiers
-                undefined, // asterisk token
-                undefined, // name
-                undefined, // type params
-                undefined, // arguments
-                undefined, // type
-                ts.createBlock([
-                  ts.createThrow(
-                    ts.createNew(
-                      ts.createIdentifier("Error"),
-                      undefined, // type params
-                      [ts.createLiteral(error.message)],
-                    ),
-                  ),
-                ]),
-              ),
-              undefined, // type params
-              undefined, // arguments
-            )
-          }
+          throw createTransformError(error)
         }
       }
       return node
+    }
+
+    function getPropName(node: ts.Node): string {
+      while (node) {
+        if (ts.isPropertyAssignment(node)) {
+          return node.name.getText()
+        }
+
+        node = node.parent
+      }
     }
   }
 }
@@ -263,6 +204,8 @@ function convertBabelNode(node) {
     return ts.createIdentifier(node.name)
   } else if (bt.isMemberExpression(node)) {
     return ts.createPropertyAccess(convertBabelNode(node.object), convertBabelNode(node.property))
+  } else if (bt.isNullLiteral(node)) {
+    return ts.createNull()
   } else if (bt.isObjectExpression(node)) {
     return ts.createObjectLiteral(node.properties.map(convertBabelNode))
   } else if (bt.isObjectProperty(node)) {
@@ -281,7 +224,7 @@ function convertBabelNode(node) {
   throw new Error(`Don't know how to convert Babel node "${node.type}" to Typescript`)
 }
 
-function getDocumentName(sourcePath: string): string {
+function getDocumentNameHelper(sourcePath: string): string {
   const dir = path.basename(path.dirname(sourcePath))
   const name = path.basename(sourcePath)
   return (dir + "_" + name).replace(/\W+/g, "_")

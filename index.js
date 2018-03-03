@@ -1,25 +1,32 @@
 "use strict";
 exports.__esModule = true;
 var bt = require("babel-types");
-var chalk = require("chalk");
+var fs = require("fs");
+var GraphQL = require("graphql");
 var path = require("path");
 var ts = require("typescript");
 var buildClientSchema_1 = require("graphql/utilities/buildClientSchema");
-var RelayQLTransformer = require("babel-relay-plugin/lib/RelayQLTransformer");
+var createTransformError = require("babel-plugin-relay/lib/createTransformError");
+var RelayQLTransformer = require("babel-plugin-relay/lib/RelayQLTransformer");
 // Internal flag that signifies if the node contains any ES2015 nodes. We need this to quicker find
 // tagged template expressions and avoid descending into Typescript nodes since visitEachChild breaks.
 var ContainsES2015 = 1 << 7;
+// Load a JSON schema
 function loadSchema(filePath) {
     return buildClientSchema_1.buildClientSchema(require(filePath).data);
 }
 exports.loadSchema = loadSchema;
+// Load a .graphql schema
+function loadGraphQLSchema(filePath) {
+    return GraphQL.buildASTSchema(GraphQL.parse(fs.readFileSync(filePath, "utf8")));
+}
+exports.loadGraphQLSchema = loadGraphQLSchema;
 function getTransformer(schema, options) {
     if (options === void 0) { options = {}; }
-    var _a = options.colorize, colorize = _a === void 0 ? true : _a, _b = options.logError, logError = _b === void 0 ? console.error : _b;
-    var red = colorize ? chalk.red : function (str) { return str; }, yellow = colorize ? chalk.yellow : function (str) { return str; };
+    var _a = options.getDocumentName, getDocumentName = _a === void 0 ? getDocumentNameHelper : _a, _b = options.substituteVariables, substituteVariables = _b === void 0 ? false : _b;
     var relayQlTransformer = new RelayQLTransformer(schema, {
         snakeCase: false,
-        substituteVariables: false
+        substituteVariables: substituteVariables
     });
     return function transformer(context) {
         var sourcePath;
@@ -45,72 +52,28 @@ function getTransformer(schema, options) {
         function visitTaggedTemplateExpression(node) {
             if (node.tag.getText() === "Relay.QL") {
                 try {
-                    // Convert the file's basename to an ok document name
-                    var documentName = getDocumentName(sourcePath);
                     var template = convertTemplateLiteral(node.template);
                     var result = relayQlTransformer.transform(bt, template, {
-                        documentName: documentName,
+                        documentName: getDocumentName(sourcePath),
                         enableValidation: true,
-                        tagName: "Relay.QL"
+                        tagName: "Relay.QL",
+                        propName: getPropName(node)
                     });
                     return convertBabelNode(result);
                 }
                 catch (error) {
-                    if (error.stack && !error.stack.includes("validation errors")) {
-                        logError(red(error.stack));
-                    }
-                    else if (error.message) {
-                        logError(red(error.message));
-                    }
-                    if (error.sourceText && error.validationErrors) {
-                        var source = error.sourceText;
-                        var errorsByLine_1 = {};
-                        error.validationErrors.forEach(function (error) {
-                            error.locations.forEach(function (location) {
-                                if (!errorsByLine_1[location.line]) {
-                                    errorsByLine_1[location.line] = [];
-                                }
-                                errorsByLine_1[location.line].push({
-                                    line: location.line,
-                                    column: location.column,
-                                    message: error.message
-                                });
-                            });
-                        });
-                        var message_1 = "";
-                        source.split("\n").forEach(function (line, idx) {
-                            var lineNum = idx + 1;
-                            message_1 += line + "\n";
-                            if (errorsByLine_1[lineNum]) {
-                                errorsByLine_1[lineNum].forEach(function (error) {
-                                    var spacer = " ".repeat(error.column - 1);
-                                    message_1 += spacer + yellow("^ " + error.message) + "\n";
-                                });
-                            }
-                        });
-                        logError(message_1.trim());
-                    }
-                    if (process.env.NODE_ENV === "production") {
-                        throw error;
-                    }
-                    else {
-                        // Generate a runtime throw statement. Because this will get inserted as the return value,
-                        // wrap the throw in an IIFE. Pfft, throw statements, please..
-                        return ts.createCall(ts.createFunctionExpression(undefined, // modifiers
-                        undefined, // asterisk token
-                        undefined, // name
-                        undefined, // type params
-                        undefined, // arguments
-                        undefined, // type
-                        ts.createBlock([
-                            ts.createThrow(ts.createNew(ts.createIdentifier("Error"), undefined, // type params
-                            [ts.createLiteral(error.message)])),
-                        ])), undefined, // type params
-                        undefined);
-                    }
+                    throw createTransformError(error);
                 }
             }
             return node;
+        }
+        function getPropName(node) {
+            while (node) {
+                if (ts.isPropertyAssignment(node)) {
+                    return node.name.getText();
+                }
+                node = node.parent;
+            }
         }
     };
 }
@@ -216,6 +179,9 @@ function convertBabelNode(node) {
     else if (bt.isMemberExpression(node)) {
         return ts.createPropertyAccess(convertBabelNode(node.object), convertBabelNode(node.property));
     }
+    else if (bt.isNullLiteral(node)) {
+        return ts.createNull();
+    }
     else if (bt.isObjectExpression(node)) {
         return ts.createObjectLiteral(node.properties.map(convertBabelNode));
     }
@@ -236,7 +202,7 @@ function convertBabelNode(node) {
     }
     throw new Error("Don't know how to convert Babel node \"" + node.type + "\" to Typescript");
 }
-function getDocumentName(sourcePath) {
+function getDocumentNameHelper(sourcePath) {
     var dir = path.basename(path.dirname(sourcePath));
     var name = path.basename(sourcePath);
     return (dir + "_" + name).replace(/\W+/g, "_");

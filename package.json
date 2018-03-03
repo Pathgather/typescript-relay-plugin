@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "TS_NODE_PROJECT=. NODE_ENV=test mocha --require ts-node/register --require ts-node/register \"test/*_test.{js,ts,tsx}\"",
+    "test:inspect": "TS_NODE_PROJECT=. NODE_ENV=test mocha --debug-brk --inspect --require ts-node/register --require ts-node/register \"test/*_test.{js,ts,tsx}\"",
     "test:watch": "nodemon -e ts,tsx --exec npm test"
   },
   "author": "Guntars Asmanis-Graham",
@@ -19,6 +20,7 @@
     "expect": "^1.20.2",
     "mocha": "^5.0.1",
     "nodemon": "^1.17.1",
+    "prettier": "^1.11.1",
     "ts-node": "^4.1.0"
   },
   "dependencies": {
@@ -26,7 +28,7 @@
     "chalk": "^1.1.3"
   },
   "peerDependencies": {
-    "babel-relay-plugin": "*",
+    "babel-plugin-relay": "*",
     "graphql": "*",
     "typescript": "*"
   }
