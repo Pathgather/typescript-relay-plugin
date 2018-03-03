@@ -28,11 +28,9 @@ describe("BabelRelayPlugin snapshot", () => {
     it(`should transform "${filename}"`, () => {
       try {
         var source = compile(input, undefined, {
-          colorize: false,
           getDocumentName() {
             return "Unknown"
           },
-          logError(msg) {},
           substituteVariables: true,
         })
         var result = normalizeSource(source)
